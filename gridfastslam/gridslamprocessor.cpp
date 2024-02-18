@@ -18,7 +18,9 @@ const double m_distanceThresholdCheck = 20;
 using namespace std;
 
   GridSlamProcessor::GridSlamProcessor(): m_infoStream(cout){
-    
+    data_outputStream.open("/home/drl03/catkin_songcan/src/slam_gmapping/log/log_4.csv", ios::out);
+    csvOutput.resize(6, std::vector<double>(5000));
+    csv_num = 0;
     period_ = 5.0;
     m_obsSigmaGain=1;
     m_resampleThreshold=0.5;
@@ -149,6 +151,26 @@ using namespace std;
 }
   
   GridSlamProcessor::~GridSlamProcessor(){
+    if(data_outputStream.is_open()){
+      std::cout << "success open csv file !!!!" << std::endl;
+      data_outputStream << '0' << ',';
+      data_outputStream << '1' << ',';
+      data_outputStream << '2' << ',';
+      data_outputStream << '3' << ',';
+      data_outputStream << '4' << ',';
+      data_outputStream << '5' << '\n';
+      for(int col = 0; col < csv_num; col =col + 1){
+        data_outputStream << csvOutput[0][col] << ',';
+        data_outputStream << csvOutput[1][col] << ',';
+        data_outputStream << csvOutput[2][col] << ',';
+        data_outputStream << csvOutput[3][col] << ',';
+        data_outputStream << csvOutput[4][col] << ',';
+        data_outputStream << csvOutput[5][col] << '\n';
+      }
+    } else{
+      std::cout << "can't open csv file !!!!" << std::endl;
+    }
+    data_outputStream.close();
     cerr << __func__ << ": Start" << endl;
     cerr << __func__ << ": Deleting tree" << endl;
     for (std::vector<Particle>::iterator it=m_particles.begin(); it!=m_particles.end(); it++){
@@ -313,19 +335,21 @@ void GridSlamProcessor::setMotionModelParameters
   }
   
   
-  bool GridSlamProcessor::processScan(const RangeReading & reading, int adaptParticles){
+  bool GridSlamProcessor::processScan(const RangeReading & reading, int adaptParticles, OrientedPoint& last_mpose){
     
     /**retireve the position from the reading, and compute the odometry*/
     OrientedPoint relPose=reading.getPose();
     if (!m_count){
       m_lastPartPose=m_odoPose=relPose;
     }
-    
+
+    OrientedPoint _last_mpose = getParticles()[getBestParticleIndex()].pose;
     //write the state of the reading and update all the particles using the motion model
     for (ParticleVector::iterator it=m_particles.begin(); it!=m_particles.end(); it++){
       OrientedPoint& pose(it->pose);
       pose=m_motionModel.drawFromMotion(it->pose, relPose, m_odoPose);
     }
+    last_mpose = relPose;
 
     // update the output file
     if (m_outputStream.is_open()){
@@ -416,7 +440,21 @@ void GridSlamProcessor::setMotionModelParameters
                                reading.getTime());
 
       if (m_count>0){
-	scanMatch(plainReading);
+        std::cout << "移动距离：            " << move.x << "    " << move.y << std::endl;
+        std::cout << "上一时刻：            " << _last_mpose.x << "     " << _last_mpose.y << std::endl;
+        OrientedPoint _ori_mpose = getParticles()[getBestParticleIndex()].pose;
+        std::cout << "激光修正前：            " << _ori_mpose.x << "     " << _ori_mpose.y << std::endl;
+	      scanMatch(plainReading);
+        OrientedPoint _crr_mpose = getParticles()[getBestParticleIndex()].pose;
+        std::cout << "激光修正后：            " << _crr_mpose.x << "     " << _crr_mpose.y << std::endl;
+        csvOutput[0][csv_num] = _last_mpose.x;
+        csvOutput[1][csv_num] = _last_mpose.y;
+        csvOutput[2][csv_num] = _ori_mpose.x;
+        csvOutput[3][csv_num] = _ori_mpose.y;
+        csvOutput[4][csv_num] = _crr_mpose.x;
+        csvOutput[5][csv_num] = _crr_mpose.y;
+        csv_num = csv_num + 1;
+
 	if (m_outputStream.is_open()){
 	  m_outputStream << "LASER_READING "<< reading.size() << " ";
 	  m_outputStream << setiosflags(ios::fixed) << setprecision(2);
@@ -465,7 +503,6 @@ void GridSlamProcessor::setMotionModelParameters
       //		cerr  << "Tree: normalizing, resetting and propagating weights at the end..." ;
       updateTreeWeights(false);
       //		cerr  << ".done!" <<endl;
-      
       delete [] plainReading;
       m_lastPartPose=m_odoPose; //update the past pose for the next iteration
       m_linearDistance=0;
